@@ -1,5 +1,5 @@
 name: LD30pde
-version: 0.1.0
+version: 0.2.0
 description: A sample web application
 dependencies:
   browser: <1.0.0
