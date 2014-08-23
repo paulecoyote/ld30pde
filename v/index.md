@@ -11,7 +11,7 @@ tagline: Released Versions
 {% for page in site.static_files %}
 {% if page.path contains 'v' and page.path contains 'index.html' %}
 <li>
-  <a href="{{ site.baseurl }}{{ page.path }}">{{ site.baseurl }}{{{ page.path }}</a>
+  <a href="{{ site.baseurl }}{{ page.path }}">{{ site.baseurl }}{{ page.path }}</a>
 </li>
 {% endif %} <!-- page-category -->
 {% endfor %} <!-- page -->
