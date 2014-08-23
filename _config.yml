@@ -1,7 +1,10 @@
 top-title: LD30 
 top-tagline: Ludum Dare 30 Entry
+
 author:
   name: Paul Evans
   github: paulecoyote
 
 permalink: /blog/:year/:month/:day/:title
+
+baseurl: /ld30pde
