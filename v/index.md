@@ -17,3 +17,16 @@ Versions built of this project.
 {% endfor %} <!-- page -->
 </ul>
 
+Again ... 
+
+<ul>
+{% for page in site.pages %}
+{% if page.url contains 'v' and page.url contains 'index.html' %}
+<li>
+  <a href="{{ page.url }}">{{ page.url }}</a>
+</li>
+{% endif %} <!-- page-category -->
+{% endfor %} <!-- page -->
+</ul>
+
+{% include footer.html %}
