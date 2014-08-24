@@ -50,10 +50,11 @@ final String backgroundColour = "rgba(255,243,228,1)";
 
 bool _addFlowerToGameShowWarning = true;
 
+/// Entry point. All other functions in alpha order.
 void main() {
   // Get seed for world. If not set renavigate to default seed.
   seed = window.location.hash;
-  if (seed == null || seed == "") window.location.href = "${window.location.href}#YourNameHere";
+  if (seed == null || seed.length == 0) window.location.href = "${window.location.href}#YourNameHere";
 
   playArea = querySelector("#playArea");
   playAreaParent = playArea.parent;
@@ -116,7 +117,7 @@ void _addPlayerFlowerToGame() {
     ..desc.primaryColour = allColours[9]
     ..desc.secondaryColour = allColours[8]
     ..desc.messages.clear()
-    ..desc.messages.addAll(["connect to yourself...", "connect to your world..."])
+    ..desc.messages.addAll(["connect to yourself...", "you've found yourself..."])
     ..isActive = true
     ..trans.x = startCentreX
     ..trans.y = startCentreY
@@ -252,6 +253,10 @@ void _drawFps() {
   context.fillText("FPS ${fps.round()}",10, 10);
 }
 
+void _generateTinyWorld() {
+  //TODO: Generate world with just parents
+}
+
 void _mouseClicked(MouseEvent event) {
   var clientRect = playArea.getBoundingClientRect();
   num x = event.client.x - clientRect.left,
@@ -292,14 +297,61 @@ void _pickInteraction(num x1, num y1) {
     }
   }
 
-  num newPetalCount = 0;
-  for (Flower flower in flowersLastPicked) {
-    newPetalCount = flower.prop.petalCount + 2;
+  if (flowersLastPicked.isEmpty) {
 
-    // odd numbers look better
-    if (newPetalCount == 2) newPetalCount = 3;
-    _updatePetalCount(flower, newPetalCount);
+  } else {
+    for (Flower flower in flowersLastPicked) {
+      if (flower == playerFlower) _pickedPlayer(x1, y1);
+      else _pickedFlower(x1, y1, flower);
+    }
   }
+}
+
+void _pickedFlower(num x1, num y1, Flower flower) {
+
+}
+
+void _pickedPlayer(num x1, num y1) {
+  FlowerDescription desc = playerFlower.desc;
+  FlowerProperties prop = playerFlower.prop;
+  prop.connectionAttempts = prop.connectionAttempts + 1;
+
+  if (desc.messageIndex == 0) {
+    _playerTutorialSelfAware();
+  }
+  /*
+  else if (desc.messageIndex == 1) {
+    // TODO: Move tutorial along
+  }
+  */
+  else if (prop.connectionAttempts > prop.nextAttemptsMilestone)
+  {
+    // Factor for self-confidence here could need tuning
+    prop.nextAttemptsMilestone = prop.nextAttemptsMilestone * 2;
+
+    // Increase petals to next odd number (they look better)
+    int newPetalCount = prop.petalCount | 0x1;
+    if (newPetalCount == prop.petalCount) newPetalCount = newPetalCount + 2;
+
+    _updatePetalCount(playerFlower, newPetalCount);
+  }
+}
+
+void _pickedSpace(num x1, num y1) {
+  //TODO: Move towards there
+}
+
+void _playerTutorialSelfAware() {
+  FlowerDescription desc = playerFlower.desc;
+  FlowerProperties prop = playerFlower.prop;
+
+  prop.nextAttemptsMilestone = 16;
+
+  // Move on to next stage of ftue
+  desc.messageIndex = 1;
+
+  _updatePetalCount(playerFlower, 1);
+  _generateTinyWorld();
 }
 
 void _resize(num width, num height) {
@@ -367,7 +419,7 @@ void _updateFps(num time) {
   fpsAverage = fps * 0.05 + fpsAverage * 0.95;
 }
 
-void _updatePetalCount(Flower flower, num count) {
+void _updatePetalCount(Flower flower, int count) {
 
   FlowerProperties props = flower.prop;
   FlowerTransform trans = flower.trans;
@@ -389,7 +441,7 @@ void _updatePetalCount(Flower flower, num count) {
         (trans.radius + (flowerPetalRadius * 0.40)) +
         (desc.messageLength * 1.10);
 
-    num px = (flowerPetalRadius * 0.75).round();
+    num px = (flowerPetalRadius * 0.50).round();
     if (px < 12) px = 12;
 
     desc.messageFont = "${px}px ${messageFontFamily}";
@@ -433,13 +485,16 @@ class FlowerDescription {
 }
 
 class FlowerProperties {
-  num petalCount = 0;
+  int petalCount = 0;
   num petalRadius = 0.0;
   num petalOuterRadius = 0.0;
 
   int messageLength = 0;
   num messageOuterRadius = 0.0;
   num messageRotation = PI;
+
+  int connectionAttempts = 0;
+  int nextAttemptsMilestone = 0;
 }
 
 /// Warn: Prob should keep this to transform stuff and break down message bloat
