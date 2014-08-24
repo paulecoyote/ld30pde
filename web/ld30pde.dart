@@ -6,7 +6,11 @@ const num TO_RADIANS = PI / 180.0;
 
 CanvasRenderingContext2D context;
 List<Flower> flowers = new List<Flower>();
+List<FlowerDescription> flowersDescriptions = new List<FlowerDescription>();
+int flowersInGame = 0;
 List<Flower> flowersLastPicked = new List<Flower>();
+List<FlowerProperties>flowersProperties = new List<FlowerProperties>();
+List<FlowerTransform> flowersTransforms = new List<FlowerTransform>();
 num fps;
 num fpsAverage;
 bool isFingerDown = false;
@@ -17,6 +21,8 @@ num mainAreaX;
 num mainAreaY;
 num mainAreaX2;
 num mainAreaY2;
+/// 500 flowers seems pretty ambitious right now anyway
+int maxFlowerCapacity = 500;
 String messageFontFamily = "PT Sans Narrow";
 
 CanvasElement playArea;
@@ -42,6 +48,8 @@ final List<String> allColours =
 
 final String backgroundColour = "rgba(255,243,228,1)";
 
+bool _addFlowerToGameShowWarning = true;
+
 void main() {
   // Get seed for world. If not set renavigate to default seed.
   seed = window.location.hash;
@@ -57,6 +65,7 @@ void main() {
   playArea.onMouseUp.listen(_mouseDone);
   playArea.onClick.listen(_mouseClicked);
 
+  _warmUpLists();
   _resize(window.innerWidth, window.innerHeight);
 
   _restart();
@@ -64,21 +73,56 @@ void main() {
   window.requestAnimationFrame(_update);
 }
 
-void _createPlayerFlower() {
+Flower _addFlowerToGame() {
+  assert(flowersInGame <= maxFlowerCapacity);
+
+  if (flowersInGame == maxFlowerCapacity) {
+    // ... well we hit a limit. We could either
+    // a) preallocate another block
+    // b) see if it's alright anyway ;)
+
+    if (_addFlowerToGameShowWarning) {
+      print("DEBUG: _addFlowerToGame went over $maxFlowerCapacity ! *ONLY WARNING*");
+      _addFlowerToGameShowWarning = false;
+    }
+
+    flowers.add(new Flower());
+    flowersDescriptions.add(new FlowerDescription());
+    flowersProperties.add(new FlowerProperties());
+    flowersTransforms.add(new FlowerTransform());
+  }
+
+  Flower result = flowers[flowersInGame]
+        ..desc = flowersDescriptions[flowersInGame]
+        ..isActive = false
+        ..prop = flowersProperties[flowersInGame]
+        ..trans = flowersTransforms[flowersInGame];
+
+  flowersInGame++;
+  return result;
+}
+
+void _addPlayerFlowerToGame() {
+  // Not thought about multiplayer
+  assert(flowersInGame == 0);
+
   num startCentreX = mainAreaX * 2.0;
   num startCentreY = mainAreaY * 2.0;
   num startRadius = 20.0;
 
-  String startMessage = "connect to yourself...";
+  playerFlower = _addFlowerToGame();
+  playerFlower
+    ..desc.isPlayer = true
+    ..desc.primaryColour = allColours[9]
+    ..desc.secondaryColour = allColours[8]
+    ..desc.messages.clear()
+    ..desc.messages.addAll(["connect to yourself...", "connect to your world..."])
+    ..isActive = true
+    ..trans.x = startCentreX
+    ..trans.y = startCentreY
+    ..trans.radius = startRadius;
 
-  playerFlower = new Flower();
-  playerFlower..x = startCentreX
-      ..y = startCentreY
-      ..radius = startRadius
-      ..primaryColour = allColours[9]
-      ..secondaryColour = allColours[8];
-
-  _updateFlowerMessage(playerFlower, startMessage);
+  _updateFlowerMessage(playerFlower.desc, 0);
   _updatePetalCount(playerFlower, 3);
 }
 
@@ -99,13 +143,16 @@ void _drawFlowers(num frameTimestamp, num dt) {
 
   // Now draw centres
   //TODO: could organise by colour to stop so many context calls
-  int flowersLen = flowers.length;
-  Flower flower;
-  for (int i=0; i<flowersLen; i++) {
-    flower = flowers[i];
+  //TODO: Also split out everything that isn't active to prevent branch prediction fails.
+  //(Totally overthinking this)
+  FlowerTransform trans;
+  for (int i=0; i<flowersInGame; i++) {
+    if (!flowers[i].isActive) continue;
+
+    trans = flowersTransforms[i];
     context.beginPath();
-    context.arc(flower.x, flower.y, flower.radius, 0, TAU, false);
-    context.fillStyle = flower.primaryColour;
+    context.arc(trans.x, trans.y, trans.radius, 0, TAU, false);
+    context.fillStyle = flowersDescriptions[i].primaryColour;
     context.fill();
   }
 }
@@ -117,29 +164,36 @@ void _drawFlowerMessages(num frameTimestamp, num dt) {
   context.fillStyle = allColours[4];
   context.strokeStyle = allColours[4];
 
-  int flowersLen = flowers.length;
-  Flower flower;
+  int flowersLen = flowersInGame;
+  FlowerDescription desc;
+  FlowerProperties props;
+  FlowerTransform trans;
   num r = 0.0, outerR = 0.0, px = 0.0, py = 0.0,
     fx = 0.0, fy = 0.0, angle = 0.0, da = 0.0, ds = 0.0,
     messageLength = 0, messageSize = 12.0;
   String message;
 
   for (int i=0; i<flowersLen; i++) {
-    flower = flowers[i];
-    message = flower.message;
-    if (message == null) continue;
+    if (!flowers[i].isActive) continue;
 
+    desc = flowersDescriptions[i];
+    if (desc.messageIndex < 0) continue;
+
+    message = desc.messages[desc.messageIndex];
     messageLength = message.length;
-    fx = flower.x;
-    fy = flower.y;
+    trans = flowersTransforms[i];
 
-    r = flower.radius;
-    outerR = flower.messageOuterRadius;
+    fx = trans.x;
+    fy = trans.y;
+    r = trans.radius;
 
-    context.font = flower.messageFont;
+    props = flowersProperties[i];
+    outerR = props.messageOuterRadius;
+
+    context.font = desc.messageFont;
 
     da = PI / messageLength;
-    flower.messageRotation = ds = flower.messageRotation + (-dt * 0.001);
+    props.messageRotation = ds = props.messageRotation + (-dt * 0.001);
 
     for (int j=0; j<messageLength; j++)
     {
@@ -156,23 +210,28 @@ void _drawFlowerMessages(num frameTimestamp, num dt) {
 
 void _drawFlowerPetals(num frameTimestamp, num dt) {
   context.save(); // save state
-  int flowersLen = flowers.length;
-  Flower flower;
+  int flowersLen = flowersInGame;
+  FlowerProperties props;
+  FlowerTransform trans;
   num r = 0.0, outerR = 0.0, px = 0.0, py = 0.0,
     fx = 0.0, fy = 0.0, angle = 0.0,
     petalCount = 0, petalRadius = 0.0;
 
   for (int i=0; i<flowersLen; i++) {
-    flower = flowers[i];
-    petalCount = flower.petalCount;
-    fx = flower.x;
-    fy = flower.y;
-    angle = TO_RADIANS * (360.0 / flower.petalCount);
-    r = flower.radius;
-    petalRadius = flower.petalRadius;
-    outerR = flower.petalOuterRadius;
+    if (!flowers[i].isActive) continue;
 
-    for (int j=0; j<flower.petalCount; j++)
+    props = flowersProperties[i];
+    trans = flowersTransforms[i];
+
+    petalCount = props.petalCount;
+    fx = trans.x;
+    fy = trans.y;
+    angle = TO_RADIANS * (360.0 / props.petalCount);
+    r = trans.radius;
+    petalRadius = props.petalRadius;
+    outerR = props.petalOuterRadius;
+
+    for (int j=0; j<props.petalCount; j++)
     {
       angle = j * 2.0 * PI / petalCount;
       px = fx + cos(angle) * outerR;
@@ -180,7 +239,7 @@ void _drawFlowerPetals(num frameTimestamp, num dt) {
 
       context.beginPath();
       context.arc(px, py, petalRadius, 0, TAU, false);
-      context.fillStyle = flower.secondaryColour;
+      context.fillStyle = flowersDescriptions[i].secondaryColour;
       context.fill();
     }
   }
@@ -215,21 +274,27 @@ void _pickInteraction(num x1, num y1) {
   num x0 = 0.0, y0 = 0.0, distance = 0.0;
   flowersLastPicked.clear();
 
-  for (var flower in flowers) {
-    x0 = flower.x;
-    y0 = flower.y;
+  FlowerTransform trans;
+  FlowerProperties props;
+  for (int i=0; i<flowersInGame; i++) {
+    if (!flowers[i].isActive) continue;
+
+    trans = flowersTransforms[i];
+    x0 = trans.x;
+    y0 = trans.y;
 
     distance = sqrt((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
 
-    if (distance <= flower.messageOuterRadius) {
-      flower.lastPickedDistance = distance;
-      flowersLastPicked.add(flower);
+    props = flowersProperties[i];
+    if (distance <= props.messageOuterRadius) {
+      trans.lastPickedDistance = distance;
+      flowersLastPicked.add(flowers[i]);
     }
   }
 
   num newPetalCount = 0;
   for (Flower flower in flowersLastPicked) {
-    newPetalCount = flower.petalCount + 2;
+    newPetalCount = flower.prop.petalCount + 2;
 
     // odd numbers look better
     if (newPetalCount == 2) newPetalCount = 3;
@@ -251,7 +316,7 @@ void _resize(num width, num height) {
   mainAreaY = playAreaHeight * 0.25;
   mainAreaY2 = playAreaHeight - mainAreaY;
 
-  print ("$playAreaWidth $playAreaHeight $mainAreaX $mainAreaY $mainAreaX2 $mainAreaY2");
+  //// print ("$playAreaWidth $playAreaHeight $mainAreaX $mainAreaY $mainAreaX2 $mainAreaY2");
   playArea.width = playAreaWidth;
   playArea.height = playAreaHeight;
 }
@@ -261,14 +326,13 @@ void _resizedWindow(e) {
 }
 
 void _restart() {
-  flowers.clear();
+  flowersInGame = 0;
 
   // Use 16 bit character codes as world seed
   seeds.clear();
   seeds.addAll(seed.codeUnits);
 
-  _createPlayerFlower();
-  flowers.add(playerFlower);
+  _addPlayerFlowerToGame();
 }
 
 void _update(num frameTimestamp) {
@@ -286,13 +350,14 @@ void _update(num frameTimestamp) {
   lastTimestamp = frameTimestamp;
 }
 
-void _updateFlowerMessage(Flower flower, String message) {
-  if (message == null) {
-    flower.message = "";
+void _updateFlowerMessage(FlowerDescription flower, int index) {
+
+  if (index < 0 || index > flower.messages.length) {
+    flower.messageIndex = -1;
     flower.messageLength = 0;
   } else {
-    flower.message = message;
-    flower.messageLength = message.length;
+    flower.messageIndex = index;
+    flower.messageLength = flower.messages[index].length;
   }
 }
 
@@ -304,47 +369,84 @@ void _updateFps(num time) {
 
 void _updatePetalCount(Flower flower, num count) {
 
-  num petalCompensation = flower.petalRadius * 0.5;
-  num flowerRadius = flower.radius + petalCompensation;
-  flower.radius = flowerRadius;
+  FlowerProperties props = flower.prop;
+  FlowerTransform trans = flower.trans;
+  FlowerDescription desc = flower.desc;
 
-  flower.petalCount = count;
+  num petalCompensation = props.petalRadius * 0.5;
+  num flowerRadius = trans.radius + petalCompensation;
+  trans.radius = flowerRadius;
+
+  props.petalCount = count;
   num petalRadiusTerm = (count == 0) ? 100 : count;
   num flowerPetalRadius = flowerRadius / (petalRadiusTerm * 0.25);
-  flower.petalRadius = flowerPetalRadius;
+  props.petalRadius = flowerPetalRadius;
 
-  flower.petalOuterRadius = flowerRadius + (flowerPetalRadius * 0.40);
+  props.petalOuterRadius = flowerRadius + (flowerPetalRadius * 0.40);
 
-  if (flower.messageLength > 0) {
-    flower.messageOuterRadius = (flowerRadius / (petalRadiusTerm * 0.25)) +
-        (flower.radius + (flowerPetalRadius * 0.40)) +
-        (flower.messageLength * 1.10);
+  if (desc.messageLength > 0) {
+    props.messageOuterRadius = (flowerRadius / (petalRadiusTerm * 0.25)) +
+        (trans.radius + (flowerPetalRadius * 0.40)) +
+        (desc.messageLength * 1.10);
 
     num px = (flowerPetalRadius * 0.75).round();
     if (px < 12) px = 12;
 
-    flower.messageFont = "${px}px ${messageFontFamily}";
+    desc.messageFont = "${px}px ${messageFontFamily}";
   } else {
-    flower.messageOuterRadius = flower.petalOuterRadius;
+    props.messageOuterRadius = props.petalOuterRadius;
   }
 }
 
-/// Represents flowers
+/// We cannot control memory allocation... but we can at least give it a good shot.
+/// Allocating stuff in time tends to make stuff closer in space.
+void _warmUpLists() {
+  flowersDescriptions = new List<FlowerDescription>.generate(maxFlowerCapacity, _warmUpListsFlowerDescription);
+  flowersProperties = new List<FlowerProperties>.generate(maxFlowerCapacity, _warmUpListsFlowersProperties);
+  flowersTransforms = new List<FlowerTransform>.generate(maxFlowerCapacity, _warmUpListsFlowersTransform);
+  flowers = new List<Flower>.generate(maxFlowerCapacity, _warmUpListsFlowers);
+}
+
+Flower _warmUpListsFlowers(int index) => new Flower();
+FlowerDescription _warmUpListsFlowerDescription(int index) => new FlowerDescription();
+FlowerProperties _warmUpListsFlowersProperties(int index) => new FlowerProperties();
+FlowerTransform _warmUpListsFlowersTransform(int index) => new FlowerTransform();
+
+/// Represents a flower
+class Flower {
+  bool isActive;
+  bool get isPlayer => desc.isPlayer;
+  void set isPlayer(bool value) { desc.isPlayer = value; }
+  FlowerDescription desc;
+  FlowerProperties prop;
+  FlowerTransform trans;
+}
+
+class FlowerDescription {
+  bool isPlayer = false;
+  String primaryColour = "";
+  String secondaryColour = "";
+  int messageIndex = -1;
+  int messageLength = 0;
+  String messageFont = "";
+  List<String> messages = new List<String>();
+}
+
+class FlowerProperties {
+  num petalCount = 0;
+  num petalRadius = 0.0;
+  num petalOuterRadius = 0.0;
+
+  int messageLength = 0;
+  num messageOuterRadius = 0.0;
+  num messageRotation = PI;
+}
+
 /// Warn: Prob should keep this to transform stuff and break down message bloat
 /// into other classes to prevent cache missing for doing transforms
-class Flower {
+class FlowerTransform {
   num x = 0.0;
   num y = 0.0;
   num radius = 0.0;
   num lastPickedDistance = 0.0;
-  num petalCount = 0;
-  num petalRadius = 0.0;
-  num petalOuterRadius = 0.0;
-  String primaryColour = "";
-  String secondaryColour = "";
-  String message = "";
-  String messageFont = "";
-  int messageLength = 0;
-  num messageOuterRadius = 0.0;
-  num messageRotation = PI;
 }
