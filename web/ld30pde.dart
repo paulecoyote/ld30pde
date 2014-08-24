@@ -25,6 +25,8 @@ num playAreaHeight = window.innerHeight;//720;
 num playAreaWidth = window.innerWidth;//1280;
 Flower playerFlower = new Flower();
 num renderTime;
+String seed;
+List<int> seeds = new List<int>();
 num worldScale = 1.0;
 
 final List<String> allColours =
@@ -41,6 +43,10 @@ final List<String> allColours =
 final String backgroundColour = "rgba(255,243,228,1)";
 
 void main() {
+  // Get seed for world. If not set renavigate to default seed.
+  seed = window.location.hash;
+  if (seed == null || seed == "") window.location.href = "${window.location.href}#YourNameHere";
+
   playArea = querySelector("#playArea");
   playAreaParent = playArea.parent;
   context = playArea.getContext("2d");
@@ -256,6 +262,10 @@ void _resizedWindow(e) {
 
 void _restart() {
   flowers.clear();
+
+  // Use 16 bit character codes as world seed
+  seeds.clear();
+  seeds.addAll(seed.codeUnits);
 
   _createPlayerFlower();
   flowers.add(playerFlower);
