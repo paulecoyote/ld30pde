@@ -2,6 +2,7 @@ import 'dart:html';
 import 'dart:math';
 
 const num TAU = 2.0 * PI;
+const num TAU_QUARTER = TAU * 0.25;
 const num TO_RADIANS = PI / 180.0;
 
 // Something that takes a minute to go from 0..1 then snaps back again
@@ -40,6 +41,7 @@ Flower playerFlower = new Flower();
 num renderTime;
 String seed;
 List<int> seeds = new List<int>();
+int seedsLength = 0;
 num worldScale = 1.0;
 
 final List<String> allColours =
@@ -53,16 +55,23 @@ final List<String> allColours =
 "rgba( 88,175,133,1)", "rgba(215,247,231,1)",
 "rgba(147,216,183,1)", "rgba( 47,137, 94,1)", "rgba( 13, 85, 50,1)"];
 
+final List<String> allColoursNoOpacity =
+// Primary
+["rgba(241,194,135,0)", "rgba(255,243,228,0)",
+"rgba(255,228,194,0)", "rgba(199,143, 73,0)", "rgba(167,108, 34,0)",
+// Secondary 1
+"rgba(136,138,193,0)", "rgba(242,243,253,0)",
+"rgba(192,194,230,0)", "rgba( 85, 88,152,0)", "rgba( 41, 44,102,0)",
+// Secondary 2
+"rgba( 88,175,133,0)", "rgba(215,247,231,0)",
+"rgba(147,216,183,0)", "rgba( 47,137, 94,0)", "rgba( 13, 85, 50,0)"];
+
 final String backgroundColour = "rgba(255,243,228,1)";
 
 bool _addFlowerToGameShowWarning = true;
 
 /// Entry point. All other functions in alpha order.
 void main() {
-  // Get seed for world. If not set renavigate to default seed.
-  seed = window.location.hash;
-  if (seed == null || seed.length == 0) window.location.href = "${window.location.href}#YourNameHere";
-
   playArea = querySelector("#playArea");
   playAreaParent = playArea.parent;
   context = playArea.getContext("2d");
@@ -75,9 +84,9 @@ void main() {
 
   _warmUpLists();
   _resize(window.innerWidth, window.innerHeight);
-
   _restart();
 
+  window.onHashChange.listen((e) {_restart(); });
   window.requestAnimationFrame(_update);
 }
 
@@ -101,15 +110,68 @@ Flower _addFlowerToGame() {
     flowersTransforms.add(new FlowerTransform());
   }
 
-  Flower result = flowers[flowersInGame]
-        ..desc = flowersDescriptions[flowersInGame]
-        ..isActive = false
-        ..lerp = flowersLerps[flowersInGame]
-        ..prop = flowersProperties[flowersInGame]
-        ..trans = flowersTransforms[flowersInGame];
+  // RESET.  Danger here is:
+  // 1. Unnecessary work if we're not recycling
+  // 2. Not resetting everything
+  //
+  // Though keeping these as POD with no functions should help object size
+  // in javascript. As functions take up space in the patch table & can be a source of
+  // de-optimisation.
+
+  FlowerDescription desc = flowersDescriptions[flowersInGame];
+  desc.firstColour = "";
+  desc.secondColour = "";
+  desc.thirdColour = "";
+  desc.firstColourNoA = "";
+  desc.secondColourNoA = "";
+  desc.thirdColourNoA = "";
+  desc.messageIndex = -1;
+  desc.messageLength = 0;
+  desc.messageFont = "";
+  desc.messages.clear();
+
+  FlowerLerp lerp = flowersLerps[flowersInGame];
+  lerp.originX = 0.0;
+  lerp.destX = 0.0;
+  lerp.originY = 0.0;
+  lerp.destY = 0.0;
+  lerp.originScale = 0.0;
+  lerp.destScale = 0.0;
+  // t should be between 0 and 1. 1 Means done.
+  lerp.t = 1.0;
+  lerp.duration = 0.0;
+  lerp.originTimestamp = 0;
+  lerp.destTimestamp = 0;
+
+  FlowerProperties prop = flowersProperties[flowersInGame];
+  prop.petalCount = 0;
+  prop.petalRadius = 0.0;
+  prop.petalOuterRadius = 0.0;
+  prop.messageLength = 0;
+  prop.messageOuterRadius = 0.0;
+  prop.messageRotation = PI;
+  prop.connectionAttempts = 0;
+  prop.nextAttemptsMilestone = 0;
+
+  FlowerTransform trans = flowersTransforms[flowersInGame];
+  trans.x = 0.0;
+  trans.dx = 0.0;
+  trans.y = 0.0;
+  trans.dy = 0.0;
+  trans.radius = 0.0;
+  trans.scale = 1.0;
+  trans.lastPickedDistance = 0.0;
+
+  Flower flower = flowers[flowersInGame];
+  flower.desc = desc;
+  flower.isActive = false;
+  flower.lerp = lerp;
+  flower.prop = prop;
+  flower.trans = trans;
+  flower.isPlayer = false;
 
   flowersInGame++;
-  return result;
+  return flower;
 }
 
 void _addPlayerFlowerToGame() {
@@ -123,8 +185,12 @@ void _addPlayerFlowerToGame() {
   playerFlower = _addFlowerToGame();
   playerFlower
     ..desc.isPlayer = true
-    ..desc.primaryColour = allColours[9]
-    ..desc.secondaryColour = allColours[8]
+    ..desc.firstColour = allColours[8]
+    ..desc.firstColourNoA = allColoursNoOpacity[8]
+    ..desc.secondColour = allColours[7]
+    ..desc.secondColourNoA = allColoursNoOpacity[7]
+    ..desc.thirdColour = allColours[9]
+    ..desc.thirdColourNoA = allColoursNoOpacity[9]
     ..desc.messages.clear()
     ..desc.messages.addAll(["connect to yourself...", "you've found yourself..."])
     ..isActive = true
@@ -156,14 +222,31 @@ void _drawFlowers(num frameTimestamp, num dt) {
   //TODO: Also split out everything that isn't active to prevent branch prediction fails.
   //(Totally overthinking this)
   FlowerTransform trans;
+  CanvasGradient grad;
+  num radius,innerRadius, innerOffset, diameter, x, y;
   for (int i=0; i<flowersInGame; i++) {
     if (!flowers[i].isActive) continue;
 
     trans = flowersTransforms[i];
     context.beginPath();
-    context.arc(trans.x, trans.y, trans.radius, 0, TAU, false);
-    context.fillStyle = flowersDescriptions[i].primaryColour;
-    context.fill();
+    //context.arc(trans.x, trans.y, trans.radius, 0, TAU, false);
+
+    radius = trans.radius;
+    innerOffset = radius * 0.05;
+    innerRadius = radius * 0.10;
+    diameter = radius * 2.0;
+    x = trans.x - radius;
+    y = trans.y - radius;
+    //context.fillStyle = flowersDescriptions[i].firstColour;
+    grad = context.createRadialGradient(trans.x - innerOffset, trans.y - innerOffset, innerRadius, trans.x, trans.y, radius);
+    grad.addColorStop(0, flowersDescriptions[i].firstColour);
+    grad.addColorStop(0.20, flowersDescriptions[i].thirdColour);
+    grad.addColorStop(0.70, flowersDescriptions[i].firstColour);
+    //grad.addColorStop(0.80, flowersDescriptions[i].thirdColour);
+    grad.addColorStop(1, flowersDescriptions[i].secondColourNoA);
+    context.fillStyle = grad;
+    //context.fill();
+    context.fillRect(x, y, diameter, diameter);
   }
 }
 
@@ -253,7 +336,7 @@ void _drawFlowerPetals(num frameTimestamp, num dt) {
 
       context.beginPath();
       context.arc(px, py, petalRadius, 0, TAU, false);
-      context.fillStyle = flowersDescriptions[i].secondaryColour;
+      context.fillStyle = flowersDescriptions[i].secondColour;
       context.fill();
     }
   }
@@ -266,8 +349,52 @@ void _drawFps() {
   context.fillText("FPS ${fps.round()}",10, 10);
 }
 
+void _generateStartWorld() {
+  _addPlayerFlowerToGame();
+}
+
 void _generateTinyWorld() {
-  //TODO: Generate world with just parents
+  FlowerTransform playerTrans = playerFlower.trans;
+  FlowerDescription playerDesc = playerFlower.desc;
+  FlowerProperties playerProps = playerFlower.prop;
+
+  num parentAngle = (seeds.first % 360) * TO_RADIANS;
+  num relativeRadius = 1.5 + (seeds[3 % seedsLength] % 2);
+
+  num startRadius = relativeRadius * playerTrans.radius;
+  num startX = playerTrans.x;
+  int primeColour = 5 + (seeds[4 % seedsLength] % 5);
+  int secondaryColour = 5 + (seeds[1 % seedsLength] % 5);
+  int thirdColour = 5 + (seeds[6 % seedsLength] % 5);
+  int petalCount = (7 + (seeds[7 % seedsLength] % 5)) | 0x1;
+
+  num parentOrbitRadius = startRadius * 2.0 + (playerProps.messageOuterRadius * 2.0);
+
+  num px = playerTrans.x + cos(parentAngle) * parentOrbitRadius;
+  num py = playerTrans.y + sin(parentAngle) * parentOrbitRadius;
+
+  Flower parent = _addFlowerToGame();
+  FlowerDescription desc = parent.desc;
+  desc..isPlayer = false
+    ..firstColour = allColours[primeColour]
+    ..firstColourNoA = allColoursNoOpacity[primeColour]
+    ..secondColour = allColours[secondaryColour]
+    ..secondColourNoA = allColoursNoOpacity[secondaryColour]
+    ..thirdColour = allColours[thirdColour]
+    ..thirdColourNoA = allColoursNoOpacity[thirdColour]
+    ..messages.clear()
+    ..messages.addAll(["you will always be my baby", "i love you"]);
+
+  parent
+    ..isActive = true
+    ..trans.x = px
+    ..trans.y = py
+    ..trans.radius = startRadius;
+
+  //num parent2Angle = parent1Angle + TAU_QUARTER + ((seeds.last % 180) * TO_RADIANS);
+
+  _updateFlowerMessage(parent.desc, 0);
+  _updatePetalCount(parent, petalCount);
 }
 
 void _mouseClicked(MouseEvent event) {
@@ -404,11 +531,27 @@ void _restart() {
   flowersInGame = 0;
 
   // Use 16 bit character codes as world seed
+  // Get seed for world. If not set renavigate to default seed.
+  seed = window.location.hash;
+  if (seed == null || seed.length == 0) {
+   seed = "#YourNameHere";
+   window.location.href = "${window.location.href}${seed}";
+  }
+
   seeds.clear();
   seeds.addAll(seed.codeUnits);
+  seedsLength = seeds.length;
 
-  _addPlayerFlowerToGame();
+  _generateStartWorld();
 }
+
+/*
+int _seedFor(int seedIndex) {
+  assert(seedIndex >= 0);
+  int i = seedIndex % seedsLength;
+  return seeds[i];
+}
+*/
 
 void _update(num frameTimestamp) {
   window.requestAnimationFrame(_update);
@@ -514,7 +657,7 @@ void _updatePetalCount(Flower flower, int count) {
   num flowerPetalRadius = flowerRadius / (petalRadiusTerm * 0.25);
   props.petalRadius = flowerPetalRadius;
 
-  props.petalOuterRadius = flowerRadius + (flowerPetalRadius * 0.40);
+  props.petalOuterRadius = flowerRadius + (flowerPetalRadius * 0.15);
 
   if (desc.messageLength > 0) {
     props.messageOuterRadius = (flowerRadius / (petalRadiusTerm * 0.25)) +
@@ -560,8 +703,12 @@ class Flower {
 
 class FlowerDescription {
   bool isPlayer = false;
-  String primaryColour = "";
-  String secondaryColour = "";
+  String firstColour = "";
+  String secondColour = "";
+  String thirdColour = "";
+  String firstColourNoA = "";
+  String secondColourNoA = "";
+  String thirdColourNoA = "";
   int messageIndex = -1;
   int messageLength = 0;
   String messageFont = "";
@@ -603,6 +750,6 @@ class FlowerTransform {
   num y = 0.0;
   num dy = 0.0;
   num radius = 0.0;
-  num scale = 0.0;
+  num scale = 1.0;
   num lastPickedDistance = 0.0;
 }
