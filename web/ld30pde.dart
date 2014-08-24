@@ -6,6 +6,10 @@ const num TO_RADIANS = PI / 180.0;
 
 // Something that takes a minute to go from 0..1 then snaps back again
 num animHelperFudge = 0.0;
+num animHelperFudgeFast = 0.0;
+num animHelperFudgeFaster = 0.0;
+num anumHelperFudgeSin = 0.0;
+num anumHelperFudgeCos = 0.0;
 CanvasRenderingContext2D context;
 List<Flower> flowers = new List<Flower>();
 List<FlowerDescription> flowersDescriptions = new List<FlowerDescription>();
@@ -129,7 +133,7 @@ void _addPlayerFlowerToGame() {
     ..trans.radius = startRadius;
 
   _updateFlowerMessage(playerFlower.desc, 0);
-  _updatePetalCount(playerFlower, 0);
+  _updatePetalCount(playerFlower, 5);
 }
 
 void _draw(num frameTimestamp, num dt) {
@@ -215,15 +219,14 @@ void _drawFlowerMessages(num frameTimestamp, num dt) {
 }
 
 void _drawFlowerPetals(num frameTimestamp, num dt) {
-  //TODO: Use math at animHelperFudge to loop animate things somehow.
-
   context.save(); // save state
   int flowersLen = flowersInGame;
   FlowerProperties props;
   FlowerTransform trans;
   num r = 0.0, outerR = 0.0, px = 0.0, py = 0.0,
     fx = 0.0, fy = 0.0, angle = 0.0,
-    petalCount = 0, petalRadius = 0.0;
+    petalCount = 0, petalRadius = 0.0,
+    petalFudgeSin = 0.0, petalFudgeCos = 0.0;
 
   for (int i=0; i<flowersLen; i++) {
     if (!flowers[i].isActive) continue;
@@ -239,11 +242,14 @@ void _drawFlowerPetals(num frameTimestamp, num dt) {
     petalRadius = props.petalRadius;
     outerR = props.petalOuterRadius;
 
-    for (int j=0; j<props.petalCount; j++)
+    for (int j=0; j<petalCount; j++)
     {
       angle = j * 2.0 * PI / petalCount;
-      px = fx + cos(angle) * outerR;
-      py = fy + sin(angle) * outerR;
+      petalFudgeSin = (petalRadius * 0.02) * sin(angle + (TAU * animHelperFudgeFaster));
+      petalFudgeCos = (petalRadius * 0.02) * cos(angle + (TAU * animHelperFudgeFaster));
+
+      px = petalFudgeCos + fx + cos(angle) * outerR;
+      py = petalFudgeSin + fy + sin(angle) * outerR;
 
       context.beginPath();
       context.arc(px, py, petalRadius, 0, TAU, false);
@@ -409,6 +415,10 @@ void _update(num frameTimestamp) {
 
   num time = new DateTime.now().millisecondsSinceEpoch;
   animHelperFudge = (time % 60000) / 60000;
+  animHelperFudgeFast  = (time % 6000) / 6000;
+  animHelperFudgeFaster  = (time % 2000) / 2000;
+  anumHelperFudgeSin = sin(TAU * animHelperFudge);
+  anumHelperFudgeCos = cos(TAU * animHelperFudge);
 
   num dt = 1.0;
   if (renderTime != null) {
