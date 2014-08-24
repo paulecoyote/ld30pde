@@ -16,6 +16,7 @@ List<Flower> flowers = new List<Flower>();
 List<FlowerDescription> flowersDescriptions = new List<FlowerDescription>();
 int flowersInGame = 0;
 List<Flower> flowersLastPicked = new List<Flower>();
+List<FlowerBehaviour> flowersBehaviours = new List<FlowerBehaviour>();
 List<FlowerLerp>flowersLerps = new List<FlowerLerp>();
 List<FlowerProperties>flowersProperties = new List<FlowerProperties>();
 List<FlowerTransform> flowersTransforms = new List<FlowerTransform>();
@@ -42,6 +43,7 @@ num renderTime;
 String seed;
 List<int> seeds = new List<int>();
 int seedsLength = 0;
+TutorialTracker tutorialTracker;
 num worldScale = 1.0;
 
 final List<String> allColours =
@@ -104,6 +106,7 @@ Flower _addFlowerToGame() {
     }
 
     flowers.add(new Flower());
+    flowersBehaviours.add(new FlowerBehaviour());
     flowersDescriptions.add(new FlowerDescription());
     flowersLerps.add(new FlowerLerp());
     flowersProperties.add(new FlowerProperties());
@@ -117,6 +120,11 @@ Flower _addFlowerToGame() {
   // Though keeping these as POD with no functions should help object size
   // in javascript. As functions take up space in the patch table & can be a source of
   // de-optimisation.
+
+  FlowerBehaviour behaviour = flowersBehaviours[flowersInGame];
+  //TODO: Reset
+  behaviour.playerConnectionAttempts = 0;
+  behaviour.playerConnectionAttemptsMilestone = 0;
 
   FlowerDescription desc = flowersDescriptions[flowersInGame];
   desc.firstColour = "";
@@ -150,8 +158,6 @@ Flower _addFlowerToGame() {
   prop.messageLength = 0;
   prop.messageOuterRadius = 0.0;
   prop.messageRotation = PI;
-  prop.connectionAttempts = 0;
-  prop.nextAttemptsMilestone = 0;
 
   FlowerTransform trans = flowersTransforms[flowersInGame];
   trans.x = 0.0;
@@ -163,6 +169,7 @@ Flower _addFlowerToGame() {
   trans.lastPickedDistance = 0.0;
 
   Flower flower = flowers[flowersInGame];
+  flower.behaviour = behaviour;
   flower.desc = desc;
   flower.isActive = false;
   flower.lerp = lerp;
@@ -183,14 +190,9 @@ void _addPlayerFlowerToGame() {
   num startRadius = 20.0;
 
   playerFlower = _addFlowerToGame();
+  _initDescriptionColours(playerFlower.desc, 8, 7, 9);
   playerFlower
     ..desc.isPlayer = true
-    ..desc.firstColour = allColours[8]
-    ..desc.firstColourNoA = allColoursNoOpacity[8]
-    ..desc.secondColour = allColours[7]
-    ..desc.secondColourNoA = allColoursNoOpacity[7]
-    ..desc.thirdColour = allColours[9]
-    ..desc.thirdColourNoA = allColoursNoOpacity[9]
     ..desc.messages.clear()
     ..desc.messages.addAll(["connect to yourself...", "you've found yourself..."])
     ..isActive = true
@@ -199,7 +201,7 @@ void _addPlayerFlowerToGame() {
     ..trans.radius = startRadius;
 
   _updateFlowerMessage(playerFlower.desc, 0);
-  _updatePetalCount(playerFlower, 5);
+  _updatePetalCount(playerFlower, 0);
 }
 
 void _draw(num frameTimestamp, num dt) {
@@ -309,7 +311,8 @@ void _drawFlowerPetals(num frameTimestamp, num dt) {
   num r = 0.0, outerR = 0.0, px = 0.0, py = 0.0,
     fx = 0.0, fy = 0.0, angle = 0.0,
     petalCount = 0, petalRadius = 0.0,
-    petalFudgeSin = 0.0, petalFudgeCos = 0.0;
+    petalFudgeSin = 0.0, petalFudgeCos = 0.0,
+    offsetFudge = 0.0;
 
   for (int i=0; i<flowersLen; i++) {
     if (!flowers[i].isActive) continue;
@@ -320,14 +323,14 @@ void _drawFlowerPetals(num frameTimestamp, num dt) {
     petalCount = props.petalCount;
     fx = trans.x;
     fy = trans.y;
-    angle = TO_RADIANS * (360.0 / props.petalCount);
     r = trans.radius;
     petalRadius = props.petalRadius;
     outerR = props.petalOuterRadius;
+    offsetFudge = i + (animHelperFudge * TAU);
 
     for (int j=0; j<petalCount; j++)
     {
-      angle = j * 2.0 * PI / petalCount;
+      angle = offsetFudge + (j * 2.0 * PI / petalCount);
       petalFudgeSin = (petalRadius * 0.02) * sin(angle + (TAU * animHelperFudgeFaster));
       petalFudgeCos = (petalRadius * 0.02) * cos(angle + (TAU * animHelperFudgeFaster));
 
@@ -350,6 +353,7 @@ void _drawFps() {
 }
 
 void _generateStartWorld() {
+  tutorialTracker = new TutorialTracker();
   _addPlayerFlowerToGame();
 }
 
@@ -363,8 +367,8 @@ void _generateTinyWorld() {
 
   num startRadius = relativeRadius * playerTrans.radius;
   num startX = playerTrans.x;
-  int primeColour = 5 + (seeds[4 % seedsLength] % 5);
-  int secondaryColour = 5 + (seeds[1 % seedsLength] % 5);
+  int firstColour = 5 + (seeds[4 % seedsLength] % 5);
+  int secondColour = 5 + (seeds[1 % seedsLength] % 5);
   int thirdColour = 5 + (seeds[6 % seedsLength] % 5);
   int petalCount = (7 + (seeds[7 % seedsLength] % 5)) | 0x1;
 
@@ -374,14 +378,16 @@ void _generateTinyWorld() {
   num py = playerTrans.y + sin(parentAngle) * parentOrbitRadius;
 
   Flower parent = _addFlowerToGame();
+  FlowerBehaviour behaviour = parent.behaviour;
   FlowerDescription desc = parent.desc;
-  desc..isPlayer = false
-    ..firstColour = allColours[primeColour]
-    ..firstColourNoA = allColoursNoOpacity[primeColour]
-    ..secondColour = allColours[secondaryColour]
-    ..secondColourNoA = allColoursNoOpacity[secondaryColour]
-    ..thirdColour = allColours[thirdColour]
-    ..thirdColourNoA = allColoursNoOpacity[thirdColour]
+  _initDescriptionColours(desc, firstColour, secondColour, thirdColour);
+
+  behaviour
+    ..lovesPlayer = 1.0
+    ..lovesUnconditionally = true;
+
+  desc
+    ..isPlayer = false
     ..messages.clear()
     ..messages.addAll(["you will always be my baby", "i love you"]);
 
@@ -395,6 +401,15 @@ void _generateTinyWorld() {
 
   _updateFlowerMessage(parent.desc, 0);
   _updatePetalCount(parent, petalCount);
+}
+
+void _initDescriptionColours(FlowerDescription desc, int first, int second, int third) {
+  desc..firstColour = allColours[first]
+    ..firstColourNoA = allColoursNoOpacity[first]
+    ..secondColour = allColours[second]
+    ..secondColourNoA = allColoursNoOpacity[second]
+    ..thirdColour = allColours[third]
+    ..thirdColourNoA = allColoursNoOpacity[third];
 }
 
 void _mouseClicked(MouseEvent event) {
@@ -448,15 +463,27 @@ void _pickInteraction(num x1, num y1) {
 }
 
 void _pickedFlower(num x1, num y1, Flower flower) {
+  //TODO: Needs work. Clicking on the far side moves away.
 
+  // Need a line going from player to flower, then adjust for its radius
+  FlowerTransform trans = flower.trans;
+  FlowerProperties prop = flower.prop;
+  num outerRadius = prop.messageOuterRadius;
+  num playerOuterRadius = playerFlower.prop.petalOuterRadius;
+  num rads = atan2(trans.x - x1, trans.y - y1);
+  num fx = (cos(rads) * outerRadius) + (trans.x - outerRadius - playerOuterRadius);
+  num fy = (sin(rads) * outerRadius) + (trans.y - outerRadius - playerOuterRadius);
+
+  _playerStartTravel(fx, fy);
 }
 
 void _pickedPlayer(num x1, num y1) {
   FlowerDescription desc = playerFlower.desc;
   FlowerProperties prop = playerFlower.prop;
-  prop.connectionAttempts = prop.connectionAttempts + 1;
+  FlowerBehaviour behaviour = playerFlower.behaviour;
+  behaviour.playerConnectionAttempts = behaviour.playerConnectionAttempts + 1;
 
-  if (desc.messageIndex == 0) {
+  if (!tutorialTracker.foundSelf) {
     _playerTutorialSelfAware();
   }
   /*
@@ -464,10 +491,10 @@ void _pickedPlayer(num x1, num y1) {
     // TODO: Move tutorial along
   }
   */
-  else if (prop.connectionAttempts > prop.nextAttemptsMilestone)
+  else if (behaviour.playerConnectionAttempts > behaviour.playerConnectionAttemptsMilestone )
   {
     // Factor for self-confidence here could need tuning
-    prop.nextAttemptsMilestone = prop.nextAttemptsMilestone * 2;
+    behaviour.playerConnectionAttemptsMilestone = behaviour.playerConnectionAttemptsMilestone * 2;
 
     // Increase petals to next odd number (they look better)
     int newPetalCount = prop.petalCount | 0x1;
@@ -478,29 +505,36 @@ void _pickedPlayer(num x1, num y1) {
 }
 
 void _pickedSpace(num x1, num y1) {
- FlowerLerp lerp = playerFlower.lerp;
- FlowerTransform trans = playerFlower.trans;
- lerp.t = 0.0;
- lerp.originX = trans.x;
- lerp.originY = trans.y;
- lerp.destX = x1;
- lerp.destY = y1;
+  _playerStartTravel(x1, y1);
+}
 
- lerp.duration = 2000.0;
- lerp.originTimestamp = new DateTime.now().millisecondsSinceEpoch;
- lerp.destTimestamp = lerp.originTimestamp + lerp.duration;
+void _playerStartTravel(num x1, num y1) {
+  FlowerLerp lerp = playerFlower.lerp;
+  FlowerTransform trans = playerFlower.trans;
+  lerp.t = 0.0;
+  lerp.originX = trans.x;
+  lerp.originY = trans.y;
+  lerp.destX = x1;
+  lerp.destY = y1;
+
+  lerp.duration = 2000.0;
+  lerp.originTimestamp = new DateTime.now().millisecondsSinceEpoch;
+  lerp.destTimestamp = lerp.originTimestamp + lerp.duration;
 }
 
 void _playerTutorialSelfAware() {
+  FlowerBehaviour behaviour = playerFlower.behaviour;
   FlowerDescription desc = playerFlower.desc;
   FlowerProperties prop = playerFlower.prop;
 
-  prop.nextAttemptsMilestone = 16;
+  behaviour.playerConnectionAttemptsMilestone = 16;
 
   // Move on to next stage of ftue
   desc.messageIndex = 1;
 
-  _updatePetalCount(playerFlower, 1);
+  tutorialTracker.foundSelf = true;
+
+  _updatePetalCount(playerFlower, 3);
   _generateTinyWorld();
 }
 
@@ -573,7 +607,12 @@ void _update(num frameTimestamp) {
 
   if (lastTimestamp == null) lastTimestamp = frameTimestamp;
   else if (frameTimestamp != lastTimestamp) {
-    _updateLerps(time, dt);
+    // Not interested first time around
+    if (renderTime != null) {
+      _updateLerps(time, dt);
+      _updatePositions(time, dt);
+    }
+
     _draw(time, dt);
   }
 
@@ -585,9 +624,6 @@ void _update(num frameTimestamp) {
 /// Also assumes it can directly update transforms
 /// TODO: Lerp forces, make it seem skiddy.
 void _updateLerps(num frameTimestamp, num dt) {
-  // Not interested first time around
-  if (renderTime == null) return;
-
   FlowerLerp lerp;
   FlowerTransform trans;
   for (int i=0; i<flowersInGame; i++) {
@@ -673,9 +709,20 @@ void _updatePetalCount(Flower flower, int count) {
   }
 }
 
+void _updatePositions(num frameTimestamp, num dt) {
+  // Apply forces
+  // React to collisions
+
+   FlowerTransform trans;
+   for (int i=0; i<flowersInGame; i++) {
+     if (!flowers[i].isActive) continue;
+   }
+}
+
 /// We cannot control memory allocation... but we can at least give it a good shot.
 /// Allocating stuff in time tends to make stuff closer in space.
 void _warmUpLists() {
+  flowersBehaviours = new List<FlowerBehaviour>.generate(maxFlowerCapacity, _warmUpListsFlowersBehaviours);
   flowersDescriptions = new List<FlowerDescription>.generate(maxFlowerCapacity, _warmUpListsFlowerDescription);
   flowersProperties = new List<FlowerProperties>.generate(maxFlowerCapacity, _warmUpListsFlowersProperties);
   flowersLerps = new List<FlowerLerp>.generate(maxFlowerCapacity, _warmUpListsFlowersLerps);
@@ -685,6 +732,7 @@ void _warmUpLists() {
 }
 
 Flower _warmUpListsFlowers(int index) => new Flower();
+FlowerBehaviour _warmUpListsFlowersBehaviours(int index) => new FlowerBehaviour();
 FlowerDescription _warmUpListsFlowerDescription(int index) => new FlowerDescription();
 FlowerLerp _warmUpListsFlowersLerps(int index) => new FlowerLerp();
 FlowerProperties _warmUpListsFlowersProperties(int index) => new FlowerProperties();
@@ -696,9 +744,21 @@ class Flower {
   bool get isPlayer => desc.isPlayer;
   void set isPlayer(bool value) { desc.isPlayer = value; }
   FlowerDescription desc;
+  FlowerBehaviour behaviour;
   FlowerLerp lerp;
   FlowerProperties prop;
   FlowerTransform trans;
+}
+
+class FlowerBehaviour {
+  /// Certainty. 0..1. 1 Completely, 0 Not at all.
+  num lovesPlayer = 0.0;
+
+  // If true then lovesPlayer is always at equivalent 1.0
+  bool lovesUnconditionally = false;
+
+  int playerConnectionAttempts = 0;
+  int playerConnectionAttemptsMilestone = 0;
 }
 
 class FlowerDescription {
@@ -737,9 +797,6 @@ class FlowerProperties {
   int messageLength = 0;
   num messageOuterRadius = 0.0;
   num messageRotation = PI;
-
-  int connectionAttempts = 0;
-  int nextAttemptsMilestone = 0;
 }
 
 /// Warn: Prob should keep this to transform stuff and break down message bloat
@@ -752,4 +809,10 @@ class FlowerTransform {
   num radius = 0.0;
   num scale = 1.0;
   num lastPickedDistance = 0.0;
+}
+
+class TutorialTracker {
+  bool foundSelf = false;
+  bool foundParent = false;
+  bool knowSelf = false;
 }
