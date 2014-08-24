@@ -6,8 +6,10 @@ const num TO_RADIANS = PI / 180.0;
 
 CanvasRenderingContext2D context;
 List<Flower> flowers = new List<Flower>();
+List<Flower> flowersLastPicked = new List<Flower>();
 num fps;
 num fpsAverage;
+bool isFingerDown = false;
 bool isFpsShown = true;
 bool isPaused = false;
 num lastTimestamp;
@@ -21,6 +23,7 @@ CanvasElement playArea;
 HtmlElement playAreaParent;
 num playAreaHeight = window.innerHeight;//720;
 num playAreaWidth = window.innerWidth;//1280;
+Flower playerFlower = new Flower();
 num renderTime;
 num worldScale = 1.0;
 
@@ -42,12 +45,35 @@ void main() {
   playAreaParent = playArea.parent;
   context = playArea.getContext("2d");
   window.onResize.listen(_resizedWindow);
+  playArea.onMouseDown.listen(_mouseDown);
+  playArea.onMouseLeave.listen(_mouseDone);
+  playArea.onMouseOut.listen(_mouseDone);
+  playArea.onMouseUp.listen(_mouseDone);
+  playArea.onClick.listen(_mouseClicked);
 
   _resize(window.innerWidth, window.innerHeight);
 
   _restart();
 
   window.requestAnimationFrame(_update);
+}
+
+void _createPlayerFlower() {
+  num startCentreX = mainAreaX * 2.0;
+  num startCentreY = mainAreaY * 2.0;
+  num startRadius = 20.0;
+
+  String startMessage = "connect to yourself...";
+
+  playerFlower = new Flower();
+  playerFlower..x = startCentreX
+      ..y = startCentreY
+      ..radius = startRadius
+      ..primaryColour = allColours[9]
+      ..secondaryColour = allColours[8];
+
+  _updateFlowerMessage(playerFlower, startMessage);
+  _updatePetalCount(playerFlower, 3);
 }
 
 void _draw(num frameTimestamp, num dt) {
@@ -76,11 +102,6 @@ void _drawFlowers(num frameTimestamp, num dt) {
     context.fillStyle = flower.primaryColour;
     context.fill();
   }
-}
-
-void _drawFps() {
-  context.fillStyle = "#000000";
-  context.fillText("FPS ${fps.round()}",10, 10);
 }
 
 void _drawFlowerMessages(num frameTimestamp, num dt) {
@@ -161,6 +182,55 @@ void _drawFlowerPetals(num frameTimestamp, num dt) {
   context.restore();
 }
 
+void _drawFps() {
+  context.fillStyle = "#000000";
+  context.fillText("FPS ${fps.round()}",10, 10);
+}
+
+void _mouseClicked(MouseEvent event) {
+  var clientRect = playArea.getBoundingClientRect();
+  num x = event.client.x - clientRect.left,
+    y = event.client.y - clientRect.top;
+
+  _pickInteraction(x, y);
+}
+
+void _mouseDone(MouseEvent event) {
+  isFingerDown = false;
+}
+
+void _mouseDown(MouseEvent event) {
+  isFingerDown = true;
+}
+
+/// Expects x and y in terms of canvas x and y
+/// TODO: This is going to have be be looked at when scale is used.
+void _pickInteraction(num x1, num y1) {
+  num x0 = 0.0, y0 = 0.0, distance = 0.0;
+  flowersLastPicked.clear();
+
+  for (var flower in flowers) {
+    x0 = flower.x;
+    y0 = flower.y;
+
+    distance = sqrt((x1-x0)*(x1-x0) + (y1-y0)*(y1-y0));
+
+    if (distance <= flower.messageOuterRadius) {
+      flower.lastPickedDistance = distance;
+      flowersLastPicked.add(flower);
+    }
+  }
+
+  num newPetalCount = 0;
+  for (Flower flower in flowersLastPicked) {
+    newPetalCount = flower.petalCount + 2;
+
+    // odd numbers look better
+    if (newPetalCount == 2) newPetalCount = 3;
+    _updatePetalCount(flower, newPetalCount);
+  }
+}
+
 void _resize(num width, num height) {
   playAreaHeight = height;
   playAreaWidth = width;//playAreaHeight * 1.777777777777778;
@@ -186,22 +256,9 @@ void _resizedWindow(e) {
 
 void _restart() {
   flowers.clear();
-  num startCentreX = mainAreaX * 2.0;
-  num startCentreY = mainAreaY * 2.0;
-  num startRadius = 20.0;
-  String startMessage = "Touch me...";
 
-  Flower flower = new Flower();
-  flower..x = startCentreX
-      ..y = startCentreY
-      ..radius = startRadius
-      ..primaryColour = allColours[9]
-      ..secondaryColour = allColours[8];
-
-  _updateFlowerMessage(flower, startMessage);
-  _updatePetalCount(flower, 3);
-
-  flowers.add(flower);
+  _createPlayerFlower();
+  flowers.add(playerFlower);
 }
 
 void _update(num frameTimestamp) {
@@ -236,17 +293,24 @@ void _updateFps(num time) {
 }
 
 void _updatePetalCount(Flower flower, num count) {
+
+  num petalCompensation = flower.petalRadius * 0.5;
+  num flowerRadius = flower.radius + petalCompensation;
+  flower.radius = flowerRadius;
+
   flower.petalCount = count;
   num petalRadiusTerm = (count == 0) ? 100 : count;
-  flower.petalRadius = flower.radius / (petalRadiusTerm * 0.25);
-  flower.petalOuterRadius = flower.radius + (flower.petalRadius * 0.40);
+  num flowerPetalRadius = flowerRadius / (petalRadiusTerm * 0.25);
+  flower.petalRadius = flowerPetalRadius;
+
+  flower.petalOuterRadius = flowerRadius + (flowerPetalRadius * 0.40);
 
   if (flower.messageLength > 0) {
-    flower.messageOuterRadius = (flower.radius / (petalRadiusTerm * 0.25)) +
-        (flower.radius + (flower.petalRadius * 0.40)) +
+    flower.messageOuterRadius = (flowerRadius / (petalRadiusTerm * 0.25)) +
+        (flower.radius + (flowerPetalRadius * 0.40)) +
         (flower.messageLength * 1.10);
 
-    num px = (flower.petalRadius*0.75).round();
+    num px = (flowerPetalRadius * 0.75).round();
     if (px < 12) px = 12;
 
     flower.messageFont = "${px}px ${messageFontFamily}";
@@ -262,6 +326,7 @@ class Flower {
   num x = 0.0;
   num y = 0.0;
   num radius = 0.0;
+  num lastPickedDistance = 0.0;
   num petalCount = 0;
   num petalRadius = 0.0;
   num petalOuterRadius = 0.0;
