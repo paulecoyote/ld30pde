@@ -4,11 +4,14 @@ import 'dart:math';
 const num TAU = 2.0 * PI;
 const num TO_RADIANS = PI / 180.0;
 
+// Something that takes a minute to go from 0..1 then snaps back again
+num animHelperFudge = 0.0;
 CanvasRenderingContext2D context;
 List<Flower> flowers = new List<Flower>();
 List<FlowerDescription> flowersDescriptions = new List<FlowerDescription>();
 int flowersInGame = 0;
 List<Flower> flowersLastPicked = new List<Flower>();
+List<FlowerLerp>flowersLerps = new List<FlowerLerp>();
 List<FlowerProperties>flowersProperties = new List<FlowerProperties>();
 List<FlowerTransform> flowersTransforms = new List<FlowerTransform>();
 num fps;
@@ -89,6 +92,7 @@ Flower _addFlowerToGame() {
 
     flowers.add(new Flower());
     flowersDescriptions.add(new FlowerDescription());
+    flowersLerps.add(new FlowerLerp());
     flowersProperties.add(new FlowerProperties());
     flowersTransforms.add(new FlowerTransform());
   }
@@ -96,6 +100,7 @@ Flower _addFlowerToGame() {
   Flower result = flowers[flowersInGame]
         ..desc = flowersDescriptions[flowersInGame]
         ..isActive = false
+        ..lerp = flowersLerps[flowersInGame]
         ..prop = flowersProperties[flowersInGame]
         ..trans = flowersTransforms[flowersInGame];
 
@@ -124,7 +129,7 @@ void _addPlayerFlowerToGame() {
     ..trans.radius = startRadius;
 
   _updateFlowerMessage(playerFlower.desc, 0);
-  _updatePetalCount(playerFlower, 3);
+  _updatePetalCount(playerFlower, 0);
 }
 
 void _draw(num frameTimestamp, num dt) {
@@ -210,6 +215,8 @@ void _drawFlowerMessages(num frameTimestamp, num dt) {
 }
 
 void _drawFlowerPetals(num frameTimestamp, num dt) {
+  //TODO: Use math at animHelperFudge to loop animate things somehow.
+
   context.save(); // save state
   int flowersLen = flowersInGame;
   FlowerProperties props;
@@ -298,7 +305,7 @@ void _pickInteraction(num x1, num y1) {
   }
 
   if (flowersLastPicked.isEmpty) {
-
+    _pickedSpace(x1, y1);
   } else {
     for (Flower flower in flowersLastPicked) {
       if (flower == playerFlower) _pickedPlayer(x1, y1);
@@ -338,7 +345,17 @@ void _pickedPlayer(num x1, num y1) {
 }
 
 void _pickedSpace(num x1, num y1) {
-  //TODO: Move towards there
+ FlowerLerp lerp = playerFlower.lerp;
+ FlowerTransform trans = playerFlower.trans;
+ lerp.t = 0.0;
+ lerp.originX = trans.x;
+ lerp.originY = trans.y;
+ lerp.destX = x1;
+ lerp.destY = y1;
+
+ lerp.duration = 2000.0;
+ lerp.originTimestamp = new DateTime.now().millisecondsSinceEpoch;
+ lerp.destTimestamp = lerp.originTimestamp + lerp.duration;
 }
 
 void _playerTutorialSelfAware() {
@@ -391,19 +408,73 @@ void _update(num frameTimestamp) {
   window.requestAnimationFrame(_update);
 
   num time = new DateTime.now().millisecondsSinceEpoch;
-  if (renderTime != null) _updateFps(time);
+  animHelperFudge = (time % 60000) / 60000;
+
+  num dt = 1.0;
+  if (renderTime != null) {
+    _updateFps(time);
+    dt = time - renderTime;
+  } else {
+    dt = 1;
+  }
 
   if (lastTimestamp == null) lastTimestamp = frameTimestamp;
   else if (frameTimestamp != lastTimestamp) {
-    _draw(frameTimestamp, lastTimestamp - frameTimestamp);
+    _updateLerps(time, dt);
+    _draw(time, dt);
   }
 
   renderTime = time;
   lastTimestamp = frameTimestamp;
 }
 
-void _updateFlowerMessage(FlowerDescription flower, int index) {
+/// Right now this assume flowers have 1 lerp each
+/// Also assumes it can directly update transforms
+/// TODO: Lerp forces, make it seem skiddy.
+void _updateLerps(num frameTimestamp, num dt) {
+  // Not interested first time around
+  if (renderTime == null) return;
 
+  FlowerLerp lerp;
+  FlowerTransform trans;
+  for (int i=0; i<flowersInGame; i++) {
+    if (!flowers[i].isActive) continue;
+
+    lerp = flowersLerps[i];
+    if (lerp.t != 1.0) {
+      trans = flowersTransforms[i];
+
+      if (renderTime > lerp.destTimestamp) {
+        // Jump to dest
+        lerp.t = 1.0;
+        trans.x = lerp.destX;
+        trans.y = lerp.destY;
+        //TODO: Leave forces dx and dy alone?
+      } else {
+        num timeLeft = lerp.destTimestamp - renderTime;
+        num t = 1.0 - (timeLeft / lerp.duration);
+        lerp.t = t;
+        // print ("before: t ${t}    x ${trans.x}    y ${trans.y}  timeLeft ${timeLeft}   lerp.duration ${lerp.duration}");
+
+        // Ease in and out
+        t = t * 2.0;
+        if (t < 1.0) t = t * t / 2.0;
+        else {
+          t = t - 1.0;
+          t = -0.5 * (t*(t-2.0) - 1.0);
+        }
+
+        // lerp
+        trans.x = ((1.0-t) * lerp.originX) + (t * lerp.destX);
+        trans.y = ((1.0-t) * lerp.originY) + (t * lerp.destY);
+
+        //print ("after: t ${t}    x ${trans.x}    y ${trans.y}");
+      }
+    }
+  }
+}
+
+void _updateFlowerMessage(FlowerDescription flower, int index) {
   if (index < 0 || index > flower.messages.length) {
     flower.messageIndex = -1;
     flower.messageLength = 0;
@@ -420,12 +491,11 @@ void _updateFps(num time) {
 }
 
 void _updatePetalCount(Flower flower, int count) {
-
   FlowerProperties props = flower.prop;
   FlowerTransform trans = flower.trans;
   FlowerDescription desc = flower.desc;
 
-  num petalCompensation = props.petalRadius * 0.5;
+  num petalCompensation = props.petalRadius * 0.25;
   num flowerRadius = trans.radius + petalCompensation;
   trans.radius = flowerRadius;
 
@@ -455,12 +525,15 @@ void _updatePetalCount(Flower flower, int count) {
 void _warmUpLists() {
   flowersDescriptions = new List<FlowerDescription>.generate(maxFlowerCapacity, _warmUpListsFlowerDescription);
   flowersProperties = new List<FlowerProperties>.generate(maxFlowerCapacity, _warmUpListsFlowersProperties);
+  flowersLerps = new List<FlowerLerp>.generate(maxFlowerCapacity, _warmUpListsFlowersLerps);
   flowersTransforms = new List<FlowerTransform>.generate(maxFlowerCapacity, _warmUpListsFlowersTransform);
+
   flowers = new List<Flower>.generate(maxFlowerCapacity, _warmUpListsFlowers);
 }
 
 Flower _warmUpListsFlowers(int index) => new Flower();
 FlowerDescription _warmUpListsFlowerDescription(int index) => new FlowerDescription();
+FlowerLerp _warmUpListsFlowersLerps(int index) => new FlowerLerp();
 FlowerProperties _warmUpListsFlowersProperties(int index) => new FlowerProperties();
 FlowerTransform _warmUpListsFlowersTransform(int index) => new FlowerTransform();
 
@@ -470,6 +543,7 @@ class Flower {
   bool get isPlayer => desc.isPlayer;
   void set isPlayer(bool value) { desc.isPlayer = value; }
   FlowerDescription desc;
+  FlowerLerp lerp;
   FlowerProperties prop;
   FlowerTransform trans;
 }
@@ -482,6 +556,20 @@ class FlowerDescription {
   int messageLength = 0;
   String messageFont = "";
   List<String> messages = new List<String>();
+}
+
+class FlowerLerp {
+  num originX = 0.0;
+  num destX = 0.0;
+  num originY = 0.0;
+  num destY = 0.0;
+  num originScale = 0.0;
+  num destScale = 0.0;
+  // t should be between 0 and 1. 1 Means done.
+  num t = 1.0;
+  num duration = 0.0;
+  num originTimestamp = 0;
+  num destTimestamp = 0;
 }
 
 class FlowerProperties {
@@ -501,7 +589,10 @@ class FlowerProperties {
 /// into other classes to prevent cache missing for doing transforms
 class FlowerTransform {
   num x = 0.0;
+  num dx = 0.0;
   num y = 0.0;
+  num dy = 0.0;
   num radius = 0.0;
+  num scale = 0.0;
   num lastPickedDistance = 0.0;
 }
