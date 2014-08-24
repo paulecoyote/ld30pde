@@ -31,7 +31,7 @@ num mainAreaY;
 num mainAreaX2;
 num mainAreaY2;
 /// 500 flowers seems pretty ambitious right now anyway
-int maxFlowerCapacity = 500;
+int maxFlowerCapacity = 50;
 String messageFontFamily = "PT Sans Narrow";
 
 CanvasElement playArea;
@@ -125,6 +125,7 @@ Flower _addFlowerToGame() {
   //TODO: Reset
   behaviour.playerConnectionAttempts = 0;
   behaviour.playerConnectionAttemptsMilestone = 0;
+  behaviour.connections.clear();
 
   FlowerDescription desc = flowersDescriptions[flowersInGame];
   desc.firstColour = "";
@@ -194,7 +195,8 @@ void _addPlayerFlowerToGame() {
   playerFlower
     ..desc.isPlayer = true
     ..desc.messages.clear()
-    ..desc.messages.addAll(["connect to yourself...", "you've found yourself..."])
+    ..desc.messages.addAll(["connect to yourself", "you have found yourself",
+                            "you have found your parent", "you know yourself"])
     ..isActive = true
     ..trans.x = startCentreX
     ..trans.y = startCentreY
@@ -226,7 +228,7 @@ void _drawFlowers(num frameTimestamp, num dt) {
   FlowerTransform trans;
   CanvasGradient grad;
   num radius,innerRadius, innerOffset, diameter, x, y;
-  for (int i=0; i<flowersInGame; i++) {
+  for (int i=flowersInGame-1; i>-1; i--) {
     if (!flowers[i].isActive) continue;
 
     trans = flowersTransforms[i];
@@ -268,7 +270,7 @@ void _drawFlowerMessages(num frameTimestamp, num dt) {
     messageLength = 0, messageSize = 12.0;
   String message;
 
-  for (int i=0; i<flowersLen; i++) {
+  for (int i=flowersLen-1; i>-1; i--) {
     if (!flowers[i].isActive) continue;
 
     desc = flowersDescriptions[i];
@@ -314,7 +316,7 @@ void _drawFlowerPetals(num frameTimestamp, num dt) {
     petalFudgeSin = 0.0, petalFudgeCos = 0.0,
     offsetFudge = 0.0;
 
-  for (int i=0; i<flowersLen; i++) {
+  for (int i=flowersLen-1; i>-1; i--) {
     if (!flowers[i].isActive) continue;
 
     props = flowersProperties[i];
@@ -355,6 +357,8 @@ void _drawFps() {
 void _generateStartWorld() {
   tutorialTracker = new TutorialTracker();
   _addPlayerFlowerToGame();
+
+  //TODO: Define world bounds as massive circle of influence
 }
 
 void _generateTinyWorld() {
@@ -401,6 +405,10 @@ void _generateTinyWorld() {
 
   _updateFlowerMessage(parent.desc, 0);
   _updatePetalCount(parent, petalCount);
+}
+
+void _generateToddlerWorld() {
+  //TODO: Some more stuff in the world
 }
 
 void _initDescriptionColours(FlowerDescription desc, int first, int second, int third) {
@@ -463,6 +471,13 @@ void _pickInteraction(num x1, num y1) {
 }
 
 void _pickedFlower(num x1, num y1, Flower flower) {
+
+  if (!tutorialTracker.foundParent) {
+    _playerTutorialParentAware(flower);
+  } else {
+    _updateFlowerNextMessage(flower.desc);
+  }
+
   //TODO: Needs work. Clicking on the far side moves away.
 
   // Need a line going from player to flower, then adjust for its radius
@@ -477,7 +492,9 @@ void _pickedFlower(num x1, num y1, Flower flower) {
   _playerStartTravel(fx, fy);
 }
 
+int pick =0;
 void _pickedPlayer(num x1, num y1) {
+  print("_pickedPlayer $pick"); pick++;
   FlowerDescription desc = playerFlower.desc;
   FlowerProperties prop = playerFlower.prop;
   FlowerBehaviour behaviour = playerFlower.behaviour;
@@ -485,22 +502,26 @@ void _pickedPlayer(num x1, num y1) {
 
   if (!tutorialTracker.foundSelf) {
     _playerTutorialSelfAware();
-  }
-  /*
-  else if (desc.messageIndex == 1) {
-    // TODO: Move tutorial along
-  }
-  */
-  else if (behaviour.playerConnectionAttempts > behaviour.playerConnectionAttemptsMilestone )
-  {
-    // Factor for self-confidence here could need tuning
-    behaviour.playerConnectionAttemptsMilestone = behaviour.playerConnectionAttemptsMilestone * 2;
+  } else {
+    if (!tutorialTracker.cleared && tutorialTracker.readyToClear) {
+      _playerTurorialClear();
+    }
 
-    // Increase petals to next odd number (they look better)
-    int newPetalCount = prop.petalCount | 0x1;
-    if (newPetalCount == prop.petalCount) newPetalCount = newPetalCount + 2;
+    if (behaviour.playerConnectionAttempts > behaviour.playerConnectionAttemptsMilestone )
+    {
+      if (!tutorialTracker.knowSelf) {
+        _playerTutorialKnowSelf();
+      }
 
-    _updatePetalCount(playerFlower, newPetalCount);
+      // Factor for self-confidence here could need tuning
+      behaviour.playerConnectionAttemptsMilestone = behaviour.playerConnectionAttemptsMilestone * 2;
+
+      // Increase petals to next odd number (they look better)
+      int newPetalCount = prop.petalCount | 0x1;
+      if (newPetalCount == prop.petalCount) newPetalCount = newPetalCount + 2;
+
+      _updatePetalCount(playerFlower, newPetalCount);
+    }
   }
 }
 
@@ -522,6 +543,45 @@ void _playerStartTravel(num x1, num y1) {
   lerp.destTimestamp = lerp.originTimestamp + lerp.duration;
 }
 
+_connectFlowers(Flower talker, Flower listener, bool force) {
+  //TODO: Perhaps sometimes connection fails
+
+  // On successful connection update petals
+  // 1 for incoming, 1 for outgoing connection
+  _updatePetalCount(talker, talker.prop.petalCount + 2);
+  _updatePetalCount(listener, listener.prop.petalCount + 2);
+
+  talker.behaviour.connections.add(listener);
+  listener.behaviour.connections.add(talker);
+}
+
+void _playerTurorialClear() {
+  tutorialTracker.readyToClear = true;
+  tutorialTracker.cleared = true;
+
+  _updateFlowerMessage(playerFlower.desc, -1);
+}
+
+void _playerTutorialKnowSelf() {
+  tutorialTracker.knowSelf = true;
+
+  _updateFlowerMessage(playerFlower.desc, 3);
+  _playerTutorialUpdate();
+}
+
+void _playerTutorialParentAware(Flower parent) {
+  tutorialTracker.foundParent = true;
+  FlowerDescription desc = parent.desc;
+  _updateFlowerNextMessage(desc);
+
+  _connectFlowers(playerFlower, parent, true);
+  _updateFlowerMessage(playerFlower.desc, 2);
+
+  _generateToddlerWorld();
+
+  _playerTutorialUpdate();
+}
+
 void _playerTutorialSelfAware() {
   FlowerBehaviour behaviour = playerFlower.behaviour;
   FlowerDescription desc = playerFlower.desc;
@@ -529,13 +589,21 @@ void _playerTutorialSelfAware() {
 
   behaviour.playerConnectionAttemptsMilestone = 16;
 
-  // Move on to next stage of ftue
-  desc.messageIndex = 1;
+  _updateFlowerMessage(desc, 1);
 
   tutorialTracker.foundSelf = true;
 
   _updatePetalCount(playerFlower, 3);
   _generateTinyWorld();
+
+  _playerTutorialUpdate();
+}
+
+void _playerTutorialUpdate() {
+  if (tutorialTracker.foundParent && tutorialTracker.foundSelf &&
+      tutorialTracker.knowSelf) {
+    tutorialTracker.readyToClear = true;
+  }
 }
 
 void _resize(num width, num height) {
@@ -664,12 +732,27 @@ void _updateLerps(num frameTimestamp, num dt) {
 }
 
 void _updateFlowerMessage(FlowerDescription flower, int index) {
-  if (index < 0 || index > flower.messages.length) {
+  if (index < 0 || index >= flower.messages.length) {
     flower.messageIndex = -1;
     flower.messageLength = 0;
   } else {
     flower.messageIndex = index;
     flower.messageLength = flower.messages[index].length;
+  }
+}
+
+void _updateFlowerNextMessage(FlowerDescription flower) {
+  int messagesLength = flower.messages.length;
+  if (messagesLength != 0)
+  {
+    int index = flower.messageIndex + 1;
+    if (index < 0 || index >= flower.messages.length) {
+        flower.messageIndex = -1;
+        flower.messageLength = 0;
+    } else {
+      flower.messageIndex = index;
+      flower.messageLength = flower.messages[index].length;
+    }
   }
 }
 
@@ -680,6 +763,8 @@ void _updateFps(num time) {
 }
 
 void _updatePetalCount(Flower flower, int count) {
+  //TODO: Would be nice if new petals animated in rather than popped.
+
   FlowerProperties props = flower.prop;
   FlowerTransform trans = flower.trans;
   FlowerDescription desc = flower.desc;
@@ -759,6 +844,8 @@ class FlowerBehaviour {
 
   int playerConnectionAttempts = 0;
   int playerConnectionAttemptsMilestone = 0;
+
+  List<Flower> connections = new List<Flower>();
 }
 
 class FlowerDescription {
@@ -815,4 +902,6 @@ class TutorialTracker {
   bool foundSelf = false;
   bool foundParent = false;
   bool knowSelf = false;
+  bool readyToClear = false;
+  bool cleared = false;
 }
